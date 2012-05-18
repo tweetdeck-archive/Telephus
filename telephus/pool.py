@@ -374,8 +374,11 @@ class CassandraPoolReconnectorFactory(protocol.ClientFactory):
         self.keep_working = True
         d = self.job('queue_getter', q.get)
         d.addCallback(self.work_on_request)
+        def cancelled(f):
+            f.trap(defer.CancelledError)
+            log.err(f, 'TELEPHUS_CANCELLATION: Request cancelled.')
+        d.addErrback(cancelled)
         d.addCallback(self.maybe_do_more_work, q)
-        d.addErrback(lambda f: f.trap(defer.CancelledError))
         d.addErrback(self.scream_like_a_little_girl)
         return d
 
