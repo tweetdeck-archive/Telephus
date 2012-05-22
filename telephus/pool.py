@@ -164,6 +164,8 @@ class CassandraPoolReconnectorFactory(protocol.ClientFactory):
         if p is not None and self.service is not None:
             self.connector = connector
             self.service.client_conn_lost(self, reason)
+        else:
+            log.msg('TELEPHUS_CONNECTION_LOST: no reconn service %r proto %r' % (self.service, p))
 
     def stopFactory(self):
         # idempotent
@@ -329,13 +331,15 @@ class CassandraPoolReconnectorFactory(protocol.ClientFactory):
         if retries > 0 and self.service is not None \
         and err.check(*self.service.retryables):
             self.logstate('-- resubmit --')
-            assert self.jobphase is None, \
-                    'Factory might retry its own fatal error'
+            if self.jobphase is not None:
+                self.service.reactor.callLater(0, req_d.errback, err)
+                log.msg('Factory might retry its own fatal error: jobphase is %r' % self.jobphase)
+                return
             self.service.resubmit(req, keyspace, req_d, retries - 1)
         else:
+            self.service.reactor.callLater(0, req_d.errback, err)
             self.logstate('-- giving up [retries=%d service=%s err=%s] --'
                           % (retries, self.service, err.value))
-            req_d.errback(err)
 
     def work_on_request(self, reqtuple):
         req, keyspace, req_d, retries = reqtuple
@@ -357,8 +361,13 @@ class CassandraPoolReconnectorFactory(protocol.ClientFactory):
                 self.stopFactory()
             elif self.service is not None:
                 self.work_on_queue(q)
+            else:
+                log.msg('TELEPHUS_REAL_MAYBE_WORK: Service is None - not working on queue.')
+
         if self.service is not None:
             self.service.reactor.callLater(0, _real_maybe_do_more_work)
+        else:
+            log.msg('TELEPHUS_MAYBE_WORK: Service is None - not working on queue.')
 
     def scream_like_a_little_girl(self, fail):
         if self.service is not None:
@@ -374,11 +383,12 @@ class CassandraPoolReconnectorFactory(protocol.ClientFactory):
         self.keep_working = True
         d = self.job('queue_getter', q.get)
         d.addCallback(self.work_on_request)
-        def cancelled(f):
-            f.trap(defer.CancelledError)
-            log.err(f, 'TELEPHUS_CANCELLATION: Request cancelled.')
-        d.addErrback(cancelled)
+        def make_note_of_error(f):
+            log.err(f, 'TELEPHUS_WORK_INTERRUPTION')
+            return f
+        d.addErrback(make_note_of_error)
         d.addCallback(self.maybe_do_more_work, q)
+        d.addErrback(lambda f: f.trap(defer.CancelledError))
         d.addErrback(self.scream_like_a_little_girl)
         return d
 
