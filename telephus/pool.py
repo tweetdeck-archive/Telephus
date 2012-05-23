@@ -106,13 +106,13 @@ class CassandraPoolParticipantClient(TTwisted.ThriftClientProtocol):
     def connectionLost(self, reason):
         # the TTwisted version of this call does not account for the
         # possibility of other things happening during the errback.
+        from twisted.internet import reactor
         tex = TTransport.TTransportException(
             type=TTransport.TTransportException.END_OF_FILE,
             message='Connection closed (%s)' % reason)
-        while self.client._reqs:
-            k = iter(self.client._reqs).next()
-            v = self.client._reqs.pop(k)
-            v.errback(tex)
+        # *ensure* all request deferreds are notified
+        for req_d in self.client._reqs.values():
+            reactor.callLater(0, req_d.errback, tex)
         del self.client._reqs
         del self.client
 
@@ -294,17 +294,52 @@ class CassandraPoolReconnectorFactory(protocol.ClientFactory):
         if method is None:
             raise InvalidThriftRequest("don't understand %s request" % req.method)
 
-        d = defer.succeed(0)
 
+        def wrap_thrift_request(method, *args):
+            # convenience wrapper around thrift request with timeout support
+            d = defer.Deferred()
+
+            # institute a (fairly long) hard timeout
+            def short_circuit():
+                err = Exception('Timeout: %r %r %r' % (method, args, kwargs))
+                if not d.called:
+                    d.errback(err)
+            timeout = reactor.callLater(10, short_circuit)
+
+            req_d = defer.succeed(True)
+            # the actual thrift call
+            req_d.addCallback(lambda _ : method(*args))
+
+            def pipe_callback(res):
+                if timeout.active():
+                    timeout.cancel()
+                if d.called:
+                    log.msg('REQ_TIMEOUT: (%r, %r) -> %r' % (method, args, res))
+                else:
+                    d.callback(res)
+
+            def pipe_errback(e):
+                if timeout.active():
+                    timeout.cancel()
+                if d.called:
+                    log.err(e, 'REQ_TIMEOUT: Error (%r, %r)' % (method, args))
+                else:
+                    d.errback(e)
+
+            # make sure the results gets wired to the right place
+            req_d.addCallbacks(pipe_callback, pipe_errback)
+            return d
+
+        d = defer.succeed(0)
         if req.method == 'set_keyspace':
             newksname = req.args[0]
-            d.addCallback(lambda _: method(newksname))
+            d.addCallback(lambda _: wrap_thrift_request(method, newksname))
             d.addCallback(self.store_successful_keyspace_set, newksname)
         else:
             if keyspace is not None and keyspace != self.keyspace:
                 d.addCallback(lambda _: self.my_set_keyspace(keyspace))
             args = translateArgs(req, self.api_version)
-            d.addCallback(lambda _: method(*args))
+            d.addCallback(lambda _: wrap_thrift_request(method, *args))
             d.addCallback(lambda results: postProcess(results, req.method))
         return d
 
