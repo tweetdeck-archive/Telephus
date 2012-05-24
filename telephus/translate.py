@@ -22,7 +22,7 @@ def thrift_api_ver_to_cassandra_ver(remoteversion):
         o_major, o_minor, o_patch = map(int, thriftversion.split('.'))
         if (r_major == o_major) and (r_minor >= o_minor):
             return thriftversion
-    msg = 'Cassandra API version %s is not compatible with telephus' % ver
+    msg = 'Cassandra API version %s is not compatible with telephus' % remoteversion
     raise APIMismatch(msg)
 
 def translateArgs(request, api_version):

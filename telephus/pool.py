@@ -49,15 +49,16 @@ from time import time
 from itertools import izip, groupby
 from warnings import warn
 from twisted.application import service
-from twisted.internet import defer, protocol, error
+from twisted.internet import defer, protocol, error, reactor
 from twisted.python import failure, log
 from thrift import Thrift
 from thrift.transport import TTwisted, TTransport
 from thrift.protocol import TBinaryProtocol
 from telephus.protocol import (ManagedThriftRequest, ClientBusy,
-                               InvalidThriftRequest)
+                               InvalidThriftRequest, APIMismatch)
 from telephus.cassandra.c08 import Cassandra as Cassandra08
-from telephus.cassandra.ttypes import *
+from telephus.cassandra.ttypes import (AuthenticationRequest, TimedOutException,
+                                       UnavailableException, ConsistencyLevel)
 from telephus.client import CassandraClient
 from telephus.translate import (thrift_api_ver_to_cassandra_ver, translateArgs,
                                 postProcess)
@@ -106,7 +107,6 @@ class CassandraPoolParticipantClient(TTwisted.ThriftClientProtocol):
     def connectionLost(self, reason):
         # the TTwisted version of this call does not account for the
         # possibility of other things happening during the errback.
-        from twisted.internet import reactor
         tex = TTransport.TTransportException(
             type=TTransport.TTransportException.END_OF_FILE,
             message='Connection closed (%s)' % reason)
@@ -301,7 +301,7 @@ class CassandraPoolReconnectorFactory(protocol.ClientFactory):
 
             # institute a (fairly long) hard timeout
             def short_circuit():
-                err = Exception('Timeout: %r %r %r' % (method, args, kwargs))
+                err = Exception('Timeout: %r %r' % (method, args))
                 if not d.called:
                     d.errback(err)
             timeout = reactor.callLater(10, short_circuit)
