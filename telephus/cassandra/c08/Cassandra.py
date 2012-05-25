@@ -950,32 +950,42 @@ class Client:
     return d
 
   def send_batch_mutate(self, mutation_map, consistency_level):
-    oprot = self._oprot_factory.getProtocol(self._transport)
-    oprot.writeMessageBegin('batch_mutate', TMessageType.CALL, self._seqid)
-    args = batch_mutate_args()
-    args.mutation_map = mutation_map
-    args.consistency_level = consistency_level
-    args.write(oprot)
-    oprot.writeMessageEnd()
-    oprot.trans.flush()
+    try:
+      oprot = self._oprot_factory.getProtocol(self._transport)
+      oprot.writeMessageBegin('batch_mutate', TMessageType.CALL, self._seqid)
+      args = batch_mutate_args()
+      args.mutation_map = mutation_map
+      args.consistency_level = consistency_level
+      args.write(oprot)
+      oprot.writeMessageEnd()
+      oprot.trans.flush()
+    except:
+      # make sure any error raised here propagates to the request's deferred!
+      d = self._reqs.pop(self._seqid)
+      d.errback()
 
   def recv_batch_mutate(self, iprot, mtype, rseqid):
     d = self._reqs.pop(rseqid)
-    if mtype == TMessageType.EXCEPTION:
-      x = TApplicationException()
-      x.read(iprot)
+    try:
+      if mtype == TMessageType.EXCEPTION:
+        x = TApplicationException()
+        x.read(iprot)
+        iprot.readMessageEnd()
+        return d.errback(x)
+
+      result = batch_mutate_result()
+      result.read(iprot)
       iprot.readMessageEnd()
-      return d.errback(x)
-    result = batch_mutate_result()
-    result.read(iprot)
-    iprot.readMessageEnd()
-    if result.ire != None:
-      return d.errback(result.ire)
-    if result.ue != None:
-      return d.errback(result.ue)
-    if result.te != None:
-      return d.errback(result.te)
-    return d.callback(None)
+      if result.ire != None:
+        return d.errback(result.ire)
+      if result.ue != None:
+        return d.errback(result.ue)
+      if result.te != None:
+        return d.errback(result.te)
+      return d.callback(None)
+    except:
+      # *ensure* any error here propagates to the request's deferred!
+      d.errback()
 
   def truncate(self, cfname):
     """
@@ -3561,7 +3571,7 @@ class multiget_slice_result:
       if fid == 0:
         if ftype == TType.MAP:
           self.success = {}
-          (_ktype103, _vtype104, _size102 ) = iprot.readMapBegin() 
+          (_ktype103, _vtype104, _size102 ) = iprot.readMapBegin()
           for _i106 in xrange(_size102):
             _key107 = iprot.readString();
             _val108 = []
@@ -3790,7 +3800,7 @@ class multiget_count_result:
       if fid == 0:
         if ftype == TType.MAP:
           self.success = {}
-          (_ktype126, _vtype127, _size125 ) = iprot.readMapBegin() 
+          (_ktype126, _vtype127, _size125 ) = iprot.readMapBegin()
           for _i129 in xrange(_size125):
             _key130 = iprot.readString();
             _val131 = iprot.readI32();
@@ -5062,11 +5072,11 @@ class batch_mutate_args:
       if fid == 1:
         if ftype == TType.MAP:
           self.mutation_map = {}
-          (_ktype149, _vtype150, _size148 ) = iprot.readMapBegin() 
+          (_ktype149, _vtype150, _size148 ) = iprot.readMapBegin()
           for _i152 in xrange(_size148):
             _key153 = iprot.readString();
             _val154 = {}
-            (_ktype156, _vtype157, _size155 ) = iprot.readMapBegin() 
+            (_ktype156, _vtype157, _size155 ) = iprot.readMapBegin()
             for _i159 in xrange(_size155):
               _key160 = iprot.readString();
               _val161 = []
@@ -5426,7 +5436,7 @@ class describe_schema_versions_result:
       if fid == 0:
         if ftype == TType.MAP:
           self.success = {}
-          (_ktype174, _vtype175, _size173 ) = iprot.readMapBegin() 
+          (_ktype174, _vtype175, _size173 ) = iprot.readMapBegin()
           for _i177 in xrange(_size173):
             _key178 = iprot.readString();
             _val179 = []
