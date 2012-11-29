@@ -419,8 +419,11 @@ class CassandraPoolReconnectorFactory(protocol.ClientFactory):
         d = self.job('queue_getter', q.get)
         d.addCallback(self.work_on_request)
         def make_note_of_error(f):
-            log.err(f, 'TELEPHUS_WORK_INTERRUPTION')
-            return f
+            if f.check(defer.CancelledError) and not self.keep_working:
+                log.msg('TELEPHUS shutting down %r' % (self,))
+            else:
+                log.err(f, 'TELEPHUS_WORK_INTERRUPTION')
+                return f
         d.addErrback(make_note_of_error)
         d.addCallback(self.maybe_do_more_work, q)
         d.addErrback(lambda f: f.trap(defer.CancelledError))
