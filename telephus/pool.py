@@ -372,7 +372,18 @@ class CassandraPoolReconnectorFactory(protocol.ClientFactory):
                 return
             self.service.resubmit(req, keyspace, req_d, retries - 1)
         else:
-            self.service.reactor.callLater(0, req_d.errback, err)
+            if self.service:
+                self.service.reactor.callLater(0, req_d.errback, err)
+            else:
+                # at this point, telephus has encountered an error, but 'self.service'
+                # is None, which probably means we're been shutdown (stopService())
+                # and hence that ref to service.reactor is dangerous.  Try and deliver
+                # this failure synchronously, and failing that, log it.
+                try:
+                    req_d.errback(err)
+                except:
+                    # log this exception, and also the failure we're trying to deliver.
+                    log.err(_why='telephus: unable to deliver %r, (shutting down?)' % (err,))
             self.logstate('-- giving up [retries=%d service=%s err=%s] --'
                           % (retries, self.service, err.value))
 
