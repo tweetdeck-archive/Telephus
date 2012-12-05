@@ -775,7 +775,7 @@ class CassandraClusterPool(service.Service, object):
         self.fill_pool()
 
     def stopService(self):
-        service.Service.stopService(self)
+        service.Service.stopService(self) # should return Deferred, doesn't.
         if self.future_fill_pool is not None and self.future_fill_pool.active():
             self.future_fill_pool.cancel()
         for factory in self.connectors.copy():
@@ -784,6 +784,7 @@ class CassandraClusterPool(service.Service, object):
         self.connectors = set()
         self.good_conns = set()
         self.dying_conns = set()
+        return defer.succeed(None)
 
     def addNode(self, node):
         if not isinstance(node, CassandraNode):
